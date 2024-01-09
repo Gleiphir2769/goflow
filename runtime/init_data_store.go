@@ -5,8 +5,7 @@ import (
 	"github.com/s8sg/goflow/core/sdk"
 )
 
-func initDataStore(redisURI string, password string) (dataStore sdk.DataStore, err error) {
-	//dataStore, err = redisDataStore.GetRedisDataStore(redisURI, password)
+func initDataStore() (dataStore sdk.DataStore, err error) {
 	dataStore, err = mem_datastore.GetMemDataStore()
 	return dataStore, err
 }
