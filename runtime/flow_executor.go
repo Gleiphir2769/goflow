@@ -3,15 +3,20 @@ package runtime
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+
 	"github.com/s8sg/goflow/core/runtime"
 	"github.com/s8sg/goflow/core/sdk"
 	"github.com/s8sg/goflow/core/sdk/executor"
 	"github.com/s8sg/goflow/eventhandler"
 	"github.com/s8sg/goflow/flow/v1"
-	"io/ioutil"
-	"log"
-	"net/http"
 )
+
+type EnqueueRequestManager interface {
+	EnqueuePartialRequest(pr *runtime.Request) error
+}
 
 type FlowExecutor struct {
 	gateway                 string
@@ -29,7 +34,7 @@ type FlowExecutor struct {
 	EventHandler            sdk.EventHandler
 	Logger                  sdk.Logger
 	Handler                 FlowDefinitionHandler
-	Runtime                 *FlowRuntime
+	Runtime                 EnqueueRequestManager
 }
 
 type FlowDefinitionHandler func(flow *v1.Workflow, context *v1.Context) error
