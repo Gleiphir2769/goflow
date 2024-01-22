@@ -19,7 +19,6 @@ import (
 	"github.com/s8sg/goflow/core/sdk/exporter"
 	"github.com/s8sg/goflow/eventhandler"
 	log2 "github.com/s8sg/goflow/log"
-	"gopkg.in/redis.v5"
 )
 
 type FlowRuntime struct {
@@ -45,7 +44,7 @@ type FlowRuntime struct {
 
 	//taskQueues    map[string]rmq.Queue
 	srv *http.Server
-	rdb *redis.Client
+	//rdb *redis.Client
 	//rmqConnection rmq.Connection
 
 	taskQueues map[string]chan []byte
@@ -151,11 +150,9 @@ func (fRuntime *FlowRuntime) Register(flows map[string]FlowDefinitionHandler) er
 	}
 
 	// initialize task queues when in worker mode
-	if fRuntime.workerMode {
-		err := fRuntime.initializeTaskQueues(flows)
-		if err != nil {
-			return fmt.Errorf(fmt.Sprintf("failed to initialize task queues for flows %v, error %v", flowNames, err))
-		}
+	err := fRuntime.initializeTaskQueues(flows)
+	if err != nil {
+		return fmt.Errorf(fmt.Sprintf("failed to initialize task queues for flows %v, error %v", flowNames, err))
 	}
 
 	fRuntime.Logger.Log(fmt.Sprintf("[goflow] queue workers for flows %v started successfully", flowNames))
@@ -202,16 +199,6 @@ func OpenConnectionV2(tag string, network string, address string, password strin
 }
 
 func (fRuntime *FlowRuntime) Execute(flowName string, request *runtime.Request) error {
-
-	connection, err := OpenConnectionV2("goflow", "tcp", fRuntime.RedisURL, fRuntime.RedisPassword, 0, nil)
-	if err != nil {
-		return fmt.Errorf("failed to initiate connection, error %v", err)
-	}
-	taskQueue, err := connection.OpenQueue(fRuntime.internalRequestQueueId(flowName))
-	if err != nil {
-		return fmt.Errorf("failed to get queue, error %v", err)
-	}
-
 	data, _ := json.Marshal(&Task{
 		FlowName:    flowName,
 		RequestID:   request.RequestID,
@@ -221,22 +208,11 @@ func (fRuntime *FlowRuntime) Execute(flowName string, request *runtime.Request) 
 		Query:       request.Query,
 		RequestType: NewRequest,
 	})
-	err = taskQueue.PublishBytes(data)
-	if err != nil {
-		return fmt.Errorf("failed to publish task, error %v", err)
-	}
+	fRuntime.taskQueues[flowName] <- data
 	return nil
 }
 
 func (fRuntime *FlowRuntime) Pause(flowName string, request *runtime.Request) error {
-	connection, err := OpenConnectionV2("goflow", "tcp", fRuntime.RedisURL, fRuntime.RedisPassword, 0, nil)
-	if err != nil {
-		return fmt.Errorf("failed to initiate connection, error %v", err)
-	}
-	taskQueue, err := connection.OpenQueue(fRuntime.internalRequestQueueId(flowName))
-	if err != nil {
-		return fmt.Errorf("failed to get queue, error %v", err)
-	}
 	data, _ := json.Marshal(&Task{
 		FlowName:    flowName,
 		RequestID:   request.RequestID,
@@ -246,22 +222,11 @@ func (fRuntime *FlowRuntime) Pause(flowName string, request *runtime.Request) er
 		Query:       request.Query,
 		RequestType: PauseRequest,
 	})
-	err = taskQueue.PublishBytes(data)
-	if err != nil {
-		return fmt.Errorf("failed to publish task, error %v", err)
-	}
+	fRuntime.taskQueues[flowName] <- data
 	return nil
 }
 
 func (fRuntime *FlowRuntime) Stop(flowName string, request *runtime.Request) error {
-	connection, err := OpenConnectionV2("goflow", "tcp", fRuntime.RedisURL, fRuntime.RedisPassword, 0, nil)
-	if err != nil {
-		return fmt.Errorf("failed to initiate connection, error %v", err)
-	}
-	taskQueue, err := connection.OpenQueue(fRuntime.internalRequestQueueId(flowName))
-	if err != nil {
-		return fmt.Errorf("failed to get queue, error %v", err)
-	}
 	data, _ := json.Marshal(&Task{
 		FlowName:    flowName,
 		RequestID:   request.RequestID,
@@ -271,22 +236,11 @@ func (fRuntime *FlowRuntime) Stop(flowName string, request *runtime.Request) err
 		Query:       request.Query,
 		RequestType: StopRequest,
 	})
-	err = taskQueue.PublishBytes(data)
-	if err != nil {
-		return fmt.Errorf("failed to publish task, error %v", err)
-	}
+	fRuntime.taskQueues[flowName] <- data
 	return nil
 }
 
 func (fRuntime *FlowRuntime) Resume(flowName string, request *runtime.Request) error {
-	connection, err := OpenConnectionV2("goflow", "tcp", fRuntime.RedisURL, fRuntime.RedisPassword, 0, nil)
-	if err != nil {
-		return fmt.Errorf("failed to initiate connection, error %v", err)
-	}
-	taskQueue, err := connection.OpenQueue(fRuntime.internalRequestQueueId(flowName))
-	if err != nil {
-		return fmt.Errorf("failed to get queue, error %v", err)
-	}
 	data, _ := json.Marshal(&Task{
 		FlowName:    flowName,
 		RequestID:   request.RequestID,
@@ -296,10 +250,7 @@ func (fRuntime *FlowRuntime) Resume(flowName string, request *runtime.Request) e
 		Query:       request.Query,
 		RequestType: ResumeRequest,
 	})
-	err = taskQueue.PublishBytes(data)
-	if err != nil {
-		return fmt.Errorf("failed to publish task, error %v", err)
-	}
+	fRuntime.taskQueues[flowName] <- data
 	return nil
 }
 
@@ -560,26 +511,26 @@ func (fRuntime *FlowRuntime) requestQueueId(flowName string) string {
 }
 
 func (fRuntime *FlowRuntime) saveWorkerDetails(worker *Worker) error {
-	rdb := fRuntime.rdb
-	key := fmt.Sprintf("%s:%s", WorkerKeyInitial, worker.ID)
-	value := marshalWorker(worker)
-	rdb.Set(key, value, time.Second*RDBKeyTimeOut)
+	//rdb := fRuntime.rdb
+	//key := fmt.Sprintf("%s:%s", WorkerKeyInitial, worker.ID)
+	//value := marshalWorker(worker)
+	//rdb.Set(key, value, time.Second*RDBKeyTimeOut)
 	return nil
 }
 
 func (fRuntime *FlowRuntime) deleteWorkerDetails(worker *Worker) error {
-	rdb := fRuntime.rdb
-	key := fmt.Sprintf("%s:%s", WorkerKeyInitial, worker.ID)
-	rdb.Del(key)
+	//rdb := fRuntime.rdb
+	//key := fmt.Sprintf("%s:%s", WorkerKeyInitial, worker.ID)
+	//rdb.Del(key)
 	return nil
 }
 
 func (fRuntime *FlowRuntime) saveFlowDetails(flows map[string]string) error {
-	rdb := fRuntime.rdb
-	for flowId, definition := range flows {
-		key := fmt.Sprintf("%s:%s", FlowKeyInitial, flowId)
-		rdb.Set(key, definition, time.Second*RDBKeyTimeOut)
-	}
+	//rdb := fRuntime.rdb
+	//for flowId, definition := range flows {
+	//	key := fmt.Sprintf("%s:%s", FlowKeyInitial, flowId)
+	//	rdb.Set(key, definition, time.Second*RDBKeyTimeOut)
+	//}
 	return nil
 }
 
