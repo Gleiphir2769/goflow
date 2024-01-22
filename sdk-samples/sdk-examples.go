@@ -2,6 +2,11 @@ package main
 
 import (
 	"fmt"
+	"github.com/s8sg/goflow/samples/condition"
+	"github.com/s8sg/goflow/samples/loop"
+	"github.com/s8sg/goflow/samples/myflow"
+	"github.com/s8sg/goflow/samples/parallel"
+	"github.com/s8sg/goflow/samples/serial"
 	"github.com/s8sg/goflow/samples/single"
 	"github.com/s8sg/goflow/sdk"
 )
@@ -14,14 +19,14 @@ func main() {
 		DebugEnabled:      true,
 	}
 	fs.Register("single", single.DefineWorkflow)
-	//fs.Register("serial", serial.DefineWorkflow)
-	//fs.Register("parallel", parallel.DefineWorkflow)
-	//fs.Register("condition", condition.DefineWorkflow)
-	//fs.Register("loop", loop.DefineWorkflow)
-	//fs.Register("myflow", myflow.DefineWorkflow)
+	fs.Register("serial", serial.DefineWorkflow)
+	fs.Register("parallel", parallel.DefineWorkflow)
+	fs.Register("condition", condition.DefineWorkflow)
+	fs.Register("loop", loop.DefineWorkflow)
+	fs.Register("myflow", myflow.DefineWorkflow)
 	fmt.Println(fs.Start())
 
-	err := fs.Execute("single", &sdk.Request{Body: []byte("Hello World")})
+	err := fs.Execute("parallel", &sdk.Request{Body: []byte("Hello World")})
 	if err != nil {
 		panic(err)
 	}

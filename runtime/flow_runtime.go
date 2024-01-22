@@ -1,13 +1,8 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
-	"time"
-
 	"github.com/adjust/rmq/v4"
 	redis2 "github.com/go-redis/redis/v8"
 	"github.com/jasonlvhit/gocron"
@@ -19,33 +14,22 @@ import (
 	"github.com/s8sg/goflow/core/sdk/exporter"
 	"github.com/s8sg/goflow/eventhandler"
 	log2 "github.com/s8sg/goflow/log"
+	"log"
 )
 
 type FlowRuntime struct {
-	Flows                   map[string]FlowDefinitionHandler
-	OpenTracingUrl          string
-	RedisURL                string
-	RedisPassword           string
-	stateStore              sdk.StateStore
-	DataStore               sdk.DataStore
-	Logger                  sdk.Logger
-	Concurrency             int
-	ServerPort              int
-	ReadTimeout             time.Duration
-	WriteTimeout            time.Duration
-	RequestAuthSharedSecret string
-	RequestAuthEnabled      bool
-	EnableMonitoring        bool
-	RetryQueueCount         int
-	DebugEnabled            bool
-	workerMode              bool
+	Flows            map[string]FlowDefinitionHandler
+	OpenTracingUrl   string
+	stateStore       sdk.StateStore
+	DataStore        sdk.DataStore
+	Logger           sdk.Logger
+	Concurrency      int
+	EnableMonitoring bool
+	RetryQueueCount  int
+	DebugEnabled     bool
+	workerMode       bool
 
 	eventHandler sdk.EventHandler
-
-	//taskQueues    map[string]rmq.Queue
-	srv *http.Server
-	//rdb *redis.Client
-	//rmqConnection rmq.Connection
 
 	taskQueues map[string]chan []byte
 }
@@ -68,11 +52,8 @@ type Task struct {
 
 const (
 	InternalRequestQueueInitial = "goflow-internal-request"
-	FlowKeyInitial              = "goflow-flow"
-	WorkerKeyInitial            = "goflow-worker"
 
 	GoFlowRegisterInterval = 4
-	RDBKeyTimeOut          = 10
 
 	PartialRequest = "PARTIAL"
 	NewRequest     = "NEW"
@@ -113,16 +94,14 @@ func (fRuntime *FlowRuntime) CreateExecutor(req *runtime.Request) (executor.Exec
 		return nil, fmt.Errorf("could not find handler for flow %s", req.FlowName)
 	}
 	ex := &FlowExecutor{
-		StateStore:              fRuntime.stateStore,
-		RequestAuthSharedSecret: fRuntime.RequestAuthSharedSecret,
-		RequestAuthEnabled:      fRuntime.RequestAuthEnabled,
-		DataStore:               fRuntime.DataStore,
-		EventHandler:            fRuntime.eventHandler,
-		EnableMonitoring:        fRuntime.EnableMonitoring,
-		Handler:                 flowHandler,
-		Logger:                  fRuntime.Logger,
-		Runtime:                 fRuntime,
-		IsLoggingEnabled:        fRuntime.DebugEnabled,
+		StateStore:       fRuntime.stateStore,
+		DataStore:        fRuntime.DataStore,
+		EventHandler:     fRuntime.eventHandler,
+		EnableMonitoring: fRuntime.EnableMonitoring,
+		Handler:          flowHandler,
+		Logger:           fRuntime.Logger,
+		Runtime:          fRuntime,
+		IsLoggingEnabled: fRuntime.DebugEnabled,
 	}
 	err := ex.Init(req)
 	return ex, err
@@ -251,27 +230,6 @@ func (fRuntime *FlowRuntime) Resume(flowName string, request *runtime.Request) e
 		RequestType: ResumeRequest,
 	})
 	fRuntime.taskQueues[flowName] <- data
-	return nil
-}
-
-// StartServer starts listening for new request
-func (fRuntime *FlowRuntime) StartServer() error {
-	fRuntime.srv = &http.Server{
-		Addr:           fmt.Sprintf(":%d", fRuntime.ServerPort),
-		ReadTimeout:    fRuntime.ReadTimeout,
-		WriteTimeout:   fRuntime.WriteTimeout,
-		Handler:        Router(fRuntime),
-		MaxHeaderBytes: 1 << 20, // Max header of 1MB
-	}
-
-	return fRuntime.srv.ListenAndServe()
-}
-
-// StopServer stops the server
-func (fRuntime *FlowRuntime) StopServer() error {
-	if err := fRuntime.srv.Shutdown(context.Background()); err != nil {
-		return err
-	}
 	return nil
 }
 
