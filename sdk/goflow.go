@@ -2,24 +2,19 @@ package sdk
 
 import (
 	"fmt"
-	"time"
-
 	runtimePkg "github.com/s8sg/goflow/core/runtime"
 	"github.com/s8sg/goflow/core/sdk"
 	"github.com/s8sg/goflow/runtime"
 )
 
 type FlowService struct {
-	WorkerConcurrency   int
-	RetryCount          int
-	Flows               map[string]runtime.FlowDefinitionHandler
-	RequestReadTimeout  time.Duration
-	RequestWriteTimeout time.Duration
-	OpenTraceUrl        string
-	DataStore           sdk.DataStore
-	Logger              sdk.Logger
-	EnableMonitoring    bool
-	DebugEnabled        bool
+	WorkerConcurrency int
+	Flows             map[string]runtime.FlowDefinitionHandler
+	OpenTraceUrl      string
+	DataStore         sdk.DataStore
+	Logger            sdk.Logger
+	EnableMonitoring  bool
+	DebugEnabled      bool
 
 	runtime *runtime.FlowRuntime
 }
@@ -32,10 +27,8 @@ type Request struct {
 }
 
 const (
-	DefaultTraceUrl           = "localhost:5775"
-	DefaultWorkerConcurrency  = 2
-	DefaultReadTimeoutSecond  = 120
-	DefaultWriteTimeoutSecond = 120
+	DefaultTraceUrl          = "localhost:5775"
+	DefaultWorkerConcurrency = 2
 )
 
 func (fs *FlowService) Execute(flowName string, req *Request) error {
@@ -177,9 +170,6 @@ func (fs *FlowService) Start() error {
 	if err := fs.initRuntime(errorChan); err != nil {
 		return err
 	}
-	if err := fs.setWorkerMode(true); err != nil {
-		return err
-	}
 
 	return nil
 }
@@ -190,12 +180,6 @@ func (fs *FlowService) ConfigureDefault() {
 	}
 	if fs.WorkerConcurrency == 0 {
 		fs.WorkerConcurrency = DefaultWorkerConcurrency
-	}
-	if fs.RequestReadTimeout == 0 {
-		fs.RequestReadTimeout = DefaultReadTimeoutSecond * time.Second
-	}
-	if fs.RequestWriteTimeout == 0 {
-		fs.RequestWriteTimeout = DefaultWriteTimeoutSecond * time.Second
 	}
 }
 
@@ -211,11 +195,8 @@ func (fs *FlowService) initRuntime(errorChan chan error) error {
 		OpenTracingUrl:   fs.OpenTraceUrl,
 		DataStore:        fs.DataStore,
 		Logger:           fs.Logger,
-		ReadTimeout:      fs.RequestReadTimeout,
-		WriteTimeout:     fs.RequestWriteTimeout,
 		Concurrency:      fs.WorkerConcurrency,
 		EnableMonitoring: fs.EnableMonitoring,
-		RetryQueueCount:  fs.RetryCount,
 		DebugEnabled:     fs.DebugEnabled,
 	}
 
@@ -223,26 +204,6 @@ func (fs *FlowService) initRuntime(errorChan chan error) error {
 		return err
 	}
 	go fs.runtimeWorker(errorChan)
-
-	return nil
-}
-
-func (fs *FlowService) setWorkerMode(workerMode bool) error {
-	if fs.runtime == nil {
-		return fmt.Errorf("runtime is not initialized")
-	}
-
-	if workerMode {
-		err := fs.runtime.EnterWorkerMode()
-		if err != nil {
-			return err
-		}
-	} else {
-		err := fs.runtime.ExitWorkerMode()
-		if err != nil {
-			return err
-		}
-	}
 
 	return nil
 }

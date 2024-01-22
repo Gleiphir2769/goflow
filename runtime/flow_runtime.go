@@ -3,8 +3,6 @@ package runtime
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/adjust/rmq/v4"
-	redis2 "github.com/go-redis/redis/v8"
 	"github.com/jasonlvhit/gocron"
 	"github.com/rs/xid"
 	"github.com/s8sg/goflow/core/runtime"
@@ -25,19 +23,11 @@ type FlowRuntime struct {
 	Logger           sdk.Logger
 	Concurrency      int
 	EnableMonitoring bool
-	RetryQueueCount  int
 	DebugEnabled     bool
-	workerMode       bool
 
 	eventHandler sdk.EventHandler
 
 	taskQueues map[string]chan []byte
-}
-
-type Worker struct {
-	ID          string   `json:"id"`
-	Flows       []string `json:"flows"`
-	Concurrency int      `json:"concurrency"`
 }
 
 type Task struct {
@@ -139,44 +129,6 @@ func (fRuntime *FlowRuntime) Register(flows map[string]FlowDefinitionHandler) er
 	return nil
 }
 
-// EnterWorkerMode put the runtime into worker mode
-func (fRuntime *FlowRuntime) EnterWorkerMode() error {
-	if fRuntime.workerMode {
-		// already in worker mode
-		return nil
-	}
-	fRuntime.workerMode = true
-
-	err := fRuntime.initializeTaskQueues(fRuntime.Flows)
-	if err != nil {
-		return fmt.Errorf("failed to enter worker mode, error: " + err.Error())
-	}
-
-	return nil
-}
-
-// ExitWorkerMode take the runtime out of worker mode
-func (fRuntime *FlowRuntime) ExitWorkerMode() error {
-	if !fRuntime.workerMode {
-		// already not in worker mode
-		return nil
-	}
-	fRuntime.workerMode = false
-
-	err := fRuntime.cleanTaskQueues()
-	if err != nil {
-		return fmt.Errorf("failed to exit worker mode, error: " + err.Error())
-	}
-
-	return nil
-}
-
-// OpenConnection opens and returns a new connection
-func OpenConnectionV2(tag string, network string, address string, password string, db int, errChan chan<- error) (rmq.Connection, error) {
-	redisClient := redis2.NewClient(&redis2.Options{Network: network, Addr: address, Password: password, DB: db})
-	return rmq.OpenConnectionWithRedisClient(tag, redisClient, errChan)
-}
-
 func (fRuntime *FlowRuntime) Execute(flowName string, request *runtime.Request) error {
 	data, _ := json.Marshal(&Task{
 		FlowName:    flowName,
@@ -235,38 +187,15 @@ func (fRuntime *FlowRuntime) Resume(flowName string, request *runtime.Request) e
 
 // StartRuntime starts the runtime
 func (fRuntime *FlowRuntime) StartRuntime() error {
-	worker := &Worker{
-		ID:          getNewId(),
-		Concurrency: fRuntime.Concurrency,
-	}
-
 	registerDetails := func() error {
 		// Get the flow details for each flow
 		flowDetails := make(map[string]string)
 		for flowID, defHandler := range fRuntime.Flows {
-			worker.Flows = append(worker.Flows, flowID)
 			dag, err := getFlowDefinition(defHandler)
 			if err != nil {
 				return fmt.Errorf("failed to start runtime, dag export failed, error %v", err)
 			}
 			flowDetails[flowID] = dag
-		}
-
-		if fRuntime.workerMode {
-			err := fRuntime.saveWorkerDetails(worker)
-			if err != nil {
-				return fmt.Errorf("failed to register worker details, %v", err)
-			}
-		} else {
-			err := fRuntime.deleteWorkerDetails(worker)
-			if err != nil {
-				return fmt.Errorf("failed to deregister worker details, %v", err)
-			}
-		}
-
-		err := fRuntime.saveFlowDetails(flowDetails)
-		if err != nil {
-			return fmt.Errorf("failed to register flow details, %v", err)
 		}
 
 		return nil
@@ -308,28 +237,14 @@ func (fRuntime *FlowRuntime) EnqueuePartialRequest(pr *runtime.Request) error {
 }
 
 // Consume messages from queue
-func (fRuntime *FlowRuntime) Consume(message rmq.Delivery) {
+func (fRuntime *FlowRuntime) Consume(payload []byte) {
 	var task Task
-	if err := json.Unmarshal([]byte(message.Payload()), &task); err != nil {
+	if err := json.Unmarshal(payload, &task); err != nil {
 		fRuntime.Logger.Log("[goflow] rejecting task for parse failure, error " + err.Error())
-		if err := message.Push(); err != nil {
-			fRuntime.Logger.Log("[goflow] failed to push message to retry queue, error " + err.Error())
-			return
-		}
 		return
 	}
 	if err := fRuntime.handleRequest(makeRequestFromTask(task), task.RequestType); err != nil {
 		fRuntime.Logger.Log("[goflow] rejecting task for failure, error " + err.Error())
-		if err := message.Push(); err != nil {
-			fRuntime.Logger.Log("[goflow] failed to push message to retry queue, error " + err.Error())
-			return
-		}
-	}
-
-	err := message.Ack()
-	if err != nil {
-		fRuntime.Logger.Log("[goflow] failed to acknowledge message, error " + err.Error())
-		return
 	}
 }
 
@@ -446,9 +361,15 @@ func (fRuntime *FlowRuntime) initializeTaskQueues(flows map[string]FlowDefinitio
 		fRuntime.taskQueues[flowName] = make(chan []byte, 1000)
 	}
 
-	for flowName, ch := range fRuntime.taskQueues {
-		addConsumer(ch, fRuntime)
-		fRuntime.Logger.Log(fmt.Sprintf("added consumer for flow %s", flowName))
+	for i := 0; i < fRuntime.Concurrency; i++ {
+		for flowName, ch := range fRuntime.taskQueues {
+			go func() {
+				for data := range ch {
+					fRuntime.Consume(data)
+				}
+			}()
+			fRuntime.Logger.Log(fmt.Sprintf("added consumer for flow %s", flowName))
+		}
 	}
 
 	return nil
@@ -466,35 +387,6 @@ func (fRuntime *FlowRuntime) internalRequestQueueId(flowName string) string {
 
 func (fRuntime *FlowRuntime) requestQueueId(flowName string) string {
 	return flowName
-}
-
-func (fRuntime *FlowRuntime) saveWorkerDetails(worker *Worker) error {
-	//rdb := fRuntime.rdb
-	//key := fmt.Sprintf("%s:%s", WorkerKeyInitial, worker.ID)
-	//value := marshalWorker(worker)
-	//rdb.Set(key, value, time.Second*RDBKeyTimeOut)
-	return nil
-}
-
-func (fRuntime *FlowRuntime) deleteWorkerDetails(worker *Worker) error {
-	//rdb := fRuntime.rdb
-	//key := fmt.Sprintf("%s:%s", WorkerKeyInitial, worker.ID)
-	//rdb.Del(key)
-	return nil
-}
-
-func (fRuntime *FlowRuntime) saveFlowDetails(flows map[string]string) error {
-	//rdb := fRuntime.rdb
-	//for flowId, definition := range flows {
-	//	key := fmt.Sprintf("%s:%s", FlowKeyInitial, flowId)
-	//	rdb.Set(key, definition, time.Second*RDBKeyTimeOut)
-	//}
-	return nil
-}
-
-func marshalWorker(worker *Worker) string {
-	jsonDef, _ := json.Marshal(worker)
-	return string(jsonDef)
 }
 
 func makeRequestFromTask(task Task) *runtime.Request {
@@ -524,32 +416,4 @@ func getFlowDefinition(handler FlowDefinitionHandler) (string, error) {
 func getNewId() string {
 	guid := xid.New()
 	return guid.String()
-}
-
-func addConsumer(ch chan []byte, consumer rmq.Consumer) {
-	go func() {
-		for data := range ch {
-			consumer.Consume(&localRmqDelivery{payload: string(data)})
-		}
-	}()
-}
-
-type localRmqDelivery struct {
-	payload string
-}
-
-func (l *localRmqDelivery) Payload() string {
-	return l.payload
-}
-
-func (l *localRmqDelivery) Ack() error {
-	return nil
-}
-
-func (l *localRmqDelivery) Reject() error {
-	return nil
-}
-
-func (l *localRmqDelivery) Push() error {
-	return nil
 }

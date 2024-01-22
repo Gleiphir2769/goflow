@@ -19,22 +19,20 @@ type EnqueueRequestManager interface {
 }
 
 type FlowExecutor struct {
-	gateway                 string
-	flowName                string // the name of the function
-	reqID                   string // the request id
-	CallbackURL             string // the callback url
-	RequestAuthSharedSecret string
-	RequestAuthEnabled      bool
-	EnableMonitoring        bool
-	IsLoggingEnabled        bool
-	partialState            []byte
-	rawRequest              *executor.RawRequest
-	StateStore              sdk.StateStore
-	DataStore               sdk.DataStore
-	EventHandler            sdk.EventHandler
-	Logger                  sdk.Logger
-	Handler                 FlowDefinitionHandler
-	Runtime                 EnqueueRequestManager
+	gateway          string
+	flowName         string // the name of the function
+	reqID            string // the request id
+	CallbackURL      string // the callback url
+	EnableMonitoring bool
+	IsLoggingEnabled bool
+	partialState     []byte
+	rawRequest       *executor.RawRequest
+	StateStore       sdk.StateStore
+	DataStore        sdk.DataStore
+	EventHandler     sdk.EventHandler
+	Logger           sdk.Logger
+	Handler          FlowDefinitionHandler
+	Runtime          EnqueueRequestManager
 }
 
 type FlowDefinitionHandler func(flow *v1.Workflow, context *v1.Context) error
@@ -116,11 +114,11 @@ func (fe *FlowExecutor) GetValidationKey() (string, error) {
 }
 
 func (fe *FlowExecutor) ReqAuthEnabled() bool {
-	return fe.RequestAuthEnabled
+	return false
 }
 
 func (fe *FlowExecutor) GetReqAuthKey() (string, error) {
-	return fe.RequestAuthSharedSecret, nil
+	return "", nil
 }
 
 func (fe *FlowExecutor) MonitoringEnabled() bool {
